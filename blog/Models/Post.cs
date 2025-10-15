@@ -34,4 +34,9 @@
         public bool? IsPublished { get; set; }
         public string? Author { get; set; }
     }
+
+    public class SubscriptionRequest
+    {
+        public string Email { get; set; }
+    }
 }

@@ -4,6 +4,7 @@ using blog.Service;
 using blog.Services;
 using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Mvc;
+using Npgsql;
 
 namespace blog.Controllers
 {
@@ -13,14 +14,16 @@ namespace blog.Controllers
     public class PostsController : ControllerBase
     {
         private readonly PostRepository _postRepository;
+        private readonly IConfiguration _config;
         private readonly AuthService _authService;
         private readonly EmailService _emailService;
 
-        public PostsController(PostRepository postRepository, AuthService authService, EmailService emailService)
+        public PostsController(PostRepository postRepository, AuthService authService, EmailService emailService, IConfiguration config)
         {
             _postRepository = postRepository;
             _authService = authService;
             _emailService = emailService;
+            _config = config;
         }
 
         [HttpPost("login")]
@@ -72,6 +75,44 @@ namespace blog.Controllers
             return isValid ? Ok(new { message = "Token is valid" })
                           : BadRequest(new { message = "Invalid or expired token" });
         }
+
+        [HttpPost("subscribe")]
+        public async Task<IActionResult> Subscribe([FromBody] SubscriptionRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.Email))
+                return BadRequest(new { message = "Email is required." });
+
+            try
+            {
+                string connectionString = _config.GetConnectionString("DefaultConnection");
+
+                using var conn = new NpgsqlConnection(connectionString);
+                await conn.OpenAsync();
+
+                string query = "INSERT INTO subscribers (email) VALUES (@email)";
+                using var cmd = new NpgsqlCommand(query, conn);
+                cmd.Parameters.AddWithValue("@email", request.Email.Trim());
+
+                try
+                {
+                    await cmd.ExecuteNonQueryAsync();
+                    return Ok(new { message = "Subscription successful!" });
+                }
+                catch (PostgresException ex) when (ex.SqlState == "23505") // unique_violation
+                {
+                    return Conflict(new { message = "This email is already subscribed." });
+                }
+            }
+            catch (PostgresException ex)
+            {
+                return StatusCode(500, new { message = $"Database error: {ex.Message}" });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = $"Unexpected error: {ex.Message}" });
+            }
+        }
+
 
         [HttpGet]
         public async Task<ActionResult<List<Post>>> GetPosts()
