@@ -9,7 +9,7 @@
     BUILD_CONFIGURATION: "Release"
     DOTNET_CLI_TELEMETRY_OPTOUT: "1"
     DOCKER_REGISTRY: "myregistry.example.com"
-    IMAGE_NAME: "${DOCKER_REGISTRY}/blog"
+    IMAGE_NAME: "myregistry.example.com/blog"
     DOCKER_CREDENTIALS_ID: "docker-creds"
     NUGET_API_KEY_CRED_ID: "nuget-api-key"
     NUGET_SOURCE: "https://api.nuget.org/v3/index.json"
@@ -50,16 +50,18 @@
             allowEmptyArchive: false
 
     - name: Pack NuGet
-      when: "test -f blog.csproj"
+      when:
+        expression: "fileExists('blog.csproj')"
       steps:
         - sh: "dotnet pack blog.csproj -c ${BUILD_CONFIGURATION} -o ./artifacts/nuget --no-build"
 
     - name: Push NuGet
-      when: "test -d artifacts/nuget"
+      when:
+        expression: "fileExists('artifacts/nuget')"
       steps:
         - withCredentials:
             - string:
-                credentialsId: "${NUGET_API_KEY_CRED_ID}"
+                credentialsId: "nuget-api-key"
                 variable: "NUGET_API_KEY"
         - sh: |
             for nupkg in artifacts/nuget/*.nupkg; do
@@ -68,11 +70,12 @@
             done
 
     - name: Build & Push Docker Image
-      when: "env.DOCKER_CREDENTIALS_ID != null"
+      when:
+        expression: "env.DOCKER_CREDENTIALS_ID != null && env.DOCKER_CREDENTIALS_ID != ''"
       steps:
         - withCredentials:
             - usernamePassword:
-                credentialsId: "${DOCKER_CREDENTIALS_ID}"
+                credentialsId: "docker-creds"
                 usernameVariable: "DOCKER_USER"
                 passwordVariable: "DOCKER_PASS"
         - sh: |
