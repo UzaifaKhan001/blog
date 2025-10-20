@@ -25,6 +25,18 @@ namespace blog.Controllers
             _emailService = emailService;
             _config = config;
         }
+        [HttpGet("test-rabbit")]
+        public IActionResult TestRabbit()
+        {
+            if (HttpContext.Items["RabbitMqService"] is RabbitMqService rabbit)
+            {
+                rabbit.Publish("Hello from Middleware Rabbi httpget test rabbit work i want tMQ!");
+                return Ok(new { message = "Message sent successfully" });
+            }
+
+            return StatusCode(500, new { message = "RabbitMQ service not available" });
+        }
+
 
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] Models.LoginRequest request)

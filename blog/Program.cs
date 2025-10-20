@@ -7,7 +7,7 @@ using blog.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
-
+using blog.Middlewares;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container
@@ -61,6 +61,9 @@ builder.Services.AddScoped<PostRepository>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<JwtTokenHelper>();
 builder.Services.AddSingleton<EmailService>();
+builder.Services.AddSingleton<RabbitMqService>();
+
+
 
 // Add built-in caching
 builder.Services.AddMemoryCache();
@@ -80,6 +83,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseCors("AllowAll");
+app.UseMiddleware<RabbitMqMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 
