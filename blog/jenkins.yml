@@ -1,98 +1,99 @@
-﻿version: "1"
+﻿pipeline:
+  version: "1"
 
-agent:
-  docker:
-    image: "mcr.microsoft.com/dotnet/sdk:7.0"
-    args: "-u root:root"
+  agent:
+    docker:
+      image: "mcr.microsoft.com/dotnet/sdk:7.0"
+      args: "-u root:root"
 
-environment:
-  SOLUTION: "MySolution.sln"
-  BUILD_CONFIGURATION: "Release"
-  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
-  DOCKER_REGISTRY: "myregistry.example.com"
-  IMAGE_NAME: "${DOCKER_REGISTRY}/myapp"
-  DOCKER_CREDENTIALS_ID: "docker-creds"
-  NUGET_API_KEY_CRED_ID: "nuget-api-key"
-  NUGET_SOURCE: "https://api.nuget.org/v3/index.json"
+  environment:
+    SOLUTION: "MySolution.sln"
+    BUILD_CONFIGURATION: "Release"
+    DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+    DOCKER_REGISTRY: "myregistry.example.com"
+    IMAGE_NAME: "${DOCKER_REGISTRY}/myapp"
+    DOCKER_CREDENTIALS_ID: "docker-creds"
+    NUGET_API_KEY_CRED_ID: "nuget-api-key"
+    NUGET_SOURCE: "https://api.nuget.org/v3/index.json"
 
-options:
-  buildDiscarder:
-    daysToKeepStr: "30"
-  timestamps: true
-  skipStagesAfterUnstable: true
+  options:
+    buildDiscarder:
+      daysToKeepStr: "30"
+    timestamps: true
+    skipStagesAfterUnstable: true
 
-stages:
-  - name: Checkout
-    steps:
-      - checkout: "scm"
+  stages:
+    - name: Checkout
+      steps:
+        - checkout: "scm"
 
-  - name: Restore
-    steps:
-      - sh: "dotnet restore ${SOLUTION}"
+    - name: Restore
+      steps:
+        - sh: "dotnet restore ${SOLUTION}"
 
-  - name: Build
-    steps:
-      - sh: "dotnet build ${SOLUTION} -c ${BUILD_CONFIGURATION} --no-restore"
+    - name: Build
+      steps:
+        - sh: "dotnet build ${SOLUTION} -c ${BUILD_CONFIGURATION} --no-restore"
 
-  - name: Test
-    steps:
-      - sh: "dotnet test ${SOLUTION} -c ${BUILD_CONFIGURATION} --no-build --logger trx;LogFileName=test_results.trx"
-    post:
-      always:
+    - name: Test
+      steps:
+        - sh: "dotnet test ${SOLUTION} -c ${BUILD_CONFIGURATION} --no-build --logger trx;LogFileName=test_results.trx"
+      post:
+        always:
+          - archiveArtifacts:
+              artifacts: "**/test_results.trx"
+              allowEmptyArchive: true
+
+    - name: Publish Artifacts
+      steps:
+        - sh: |
+            dotnet publish ${SOLUTION} -c ${BUILD_CONFIGURATION} -o ./artifacts/publish --no-build
+            ls -R ./artifacts || true
         - archiveArtifacts:
-            artifacts: "**/test_results.trx"
-            allowEmptyArchive: true
+            artifacts: "artifacts/**"
+            allowEmptyArchive: false
 
-  - name: Publish Artifacts
-    steps:
-      - sh: |
-          dotnet publish ${SOLUTION} -c ${BUILD_CONFIGURATION} -o ./artifacts/publish --no-build
-          ls -R ./artifacts || true
-      - archiveArtifacts:
-          artifacts: "artifacts/**"
-          allowEmptyArchive: false
+    - name: Pack NuGet (optional)
+      when: "test -f *.csproj"
+      steps:
+        - sh: "dotnet pack src/MyProject/MyProject.csproj -c ${BUILD_CONFIGURATION} -o ./artifacts/nuget --no-build"
 
-  - name: Pack NuGet (optional)
-    when: "test -f *.csproj"
-    steps:
-      - sh: "dotnet pack src/MyProject/MyProject.csproj -c ${BUILD_CONFIGURATION} -o ./artifacts/nuget --no-build"
+    - name: Push NuGet (optional)
+      when: "test -d artifacts/nuget"
+      steps:
+        - withCredentials:
+            - string:
+                credentialsId: "${NUGET_API_KEY_CRED_ID}"
+                variable: "NUGET_API_KEY"
+        - sh: |
+            for nupkg in artifacts/nuget/*.nupkg; do
+              echo "Pushing $nupkg to ${NUGET_SOURCE}"
+              dotnet nuget push "$nupkg" -s ${NUGET_SOURCE} -k "$NUGET_API_KEY" --skip-duplicate
+            done
 
-  - name: Push NuGet (optional)
-    when: "test -d artifacts/nuget"
-    steps:
-      - withCredentials:
-          - string:
-              credentialsId: "${NUGET_API_KEY_CRED_ID}"
-              variable: "NUGET_API_KEY"
-      - sh: |
-          for nupkg in artifacts/nuget/*.nupkg; do
-            echo "Pushing $nupkg to ${NUGET_SOURCE}"
-            dotnet nuget push "$nupkg" -s ${NUGET_SOURCE} -k "$NUGET_API_KEY" --skip-duplicate
-          done
+    - name: Build Docker Image
+      when: "env.DOCKER_CREDENTIALS_ID != null"
+      steps:
+        - sh: "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ."
 
-  - name: Build Docker Image
-    when: "env.DOCKER_CREDENTIALS_ID != null"
-    steps:
-      - sh: "docker build -t ${IMAGE_NAME}:${BUILD_NUMBER} ."
+    - name: Push Docker Image
+      when: "env.DOCKER_CREDENTIALS_ID != null"
+      steps:
+        - withCredentials:
+            - usernamePassword:
+                credentialsId: "${DOCKER_CREDENTIALS_ID}"
+                usernameVariable: "DOCKER_USER"
+                passwordVariable: "DOCKER_PASS"
+        - sh: |
+            echo "$DOCKER_PASS" | docker login ${DOCKER_REGISTRY} -u "$DOCKER_USER" --password-stdin
+            docker push ${IMAGE_NAME}:${BUILD_NUMBER}
+            docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest
+            docker push ${IMAGE_NAME}:latest || true
 
-  - name: Push Docker Image
-    when: "env.DOCKER_CREDENTIALS_ID != null"
-    steps:
-      - withCredentials:
-          - usernamePassword:
-              credentialsId: "${DOCKER_CREDENTIALS_ID}"
-              usernameVariable: "DOCKER_USER"
-              passwordVariable: "DOCKER_PASS"
-      - sh: |
-          echo "$DOCKER_PASS" | docker login ${DOCKER_REGISTRY} -u "$DOCKER_USER" --password-stdin
-          docker push ${IMAGE_NAME}:${BUILD_NUMBER}
-          docker tag ${IMAGE_NAME}:${BUILD_NUMBER} ${IMAGE_NAME}:latest
-          docker push ${IMAGE_NAME}:latest || true
-
-post:
-  success:
-    - echo: "Build succeeded: ${BUILD_URL}"
-  failure:
-    - echo: "Build failed"
-  always:
-    - sh: "docker logout ${DOCKER_REGISTRY} || true"
+  post:
+    success:
+      - echo: "Build succeeded: ${BUILD_URL}"
+    failure:
+      - echo: "Build failed"
+    always:
+      - sh: "docker logout ${DOCKER_REGISTRY} || true"
