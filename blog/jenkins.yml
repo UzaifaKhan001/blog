@@ -1,9 +1,7 @@
 ﻿pipeline:
-  version: "1"
-
   agent:
     docker:
-      image: "mcr.microsoft.com/dotnet/sdk:7.0"
+      image: "mcr.microsoft.com/dotnet/sdk:8.0"
       args: "-u root:root"
 
   environment:
@@ -37,14 +35,14 @@
 
     - name: Test
       steps:
-        - sh: "dotnet test ${SOLUTION} -c ${BUILD_CONFIGURATION} --no-build --logger trx;LogFileName=test_results.trx"
+        - sh: "dotnet test ${SOLUTION} -c ${BUILD_CONFIGURATION} --no-build --logger 'trx;LogFileName=test_results.trx'"
       post:
         always:
           - archiveArtifacts:
               artifacts: "**/test_results.trx"
               allowEmptyArchive: true
 
-    - name: Publish Artifacts
+    - name: Publish
       steps:
         - sh: |
             dotnet publish ${SOLUTION} -c ${BUILD_CONFIGURATION} -o ./artifacts/publish --no-build
@@ -53,12 +51,12 @@
             artifacts: "artifacts/**"
             allowEmptyArchive: false
 
-    - name: Pack NuGet (optional)
-      when: "test -f *.csproj"
+    - name: Pack NuGet
+      when: "test -f src/MyProject/MyProject.csproj"
       steps:
         - sh: "dotnet pack src/MyProject/MyProject.csproj -c ${BUILD_CONFIGURATION} -o ./artifacts/nuget --no-build"
 
-    - name: Push NuGet (optional)
+    - name: Push NuGet
       when: "test -d artifacts/nuget"
       steps:
         - withCredentials:
@@ -92,8 +90,8 @@
 
   post:
     success:
-      - echo: "Build succeeded: ${BUILD_URL}"
+      - echo: "✅ Build succeeded: ${BUILD_URL}"
     failure:
-      - echo: "Build failed"
+      - echo: "❌ Build failed"
     always:
       - sh: "docker logout ${DOCKER_REGISTRY} || true"
